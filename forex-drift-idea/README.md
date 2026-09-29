@@ -23,6 +23,13 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requi
 ```
 You can also just open `research.ipynb` in Jupyter or VS Code with the `.venv` kernel and run all cells.
 
+## Final proposal (top of the notebook, ⭐ section)
+1. **Core:** a 50/50 carry + trade-balance basket across 17 currencies. Net Sharpe 0.73 vs 0.44 for carry alone, max drawdown −10% vs −18%. G10-only retail version: Sharpe 0.47.
+2. **Satellite:** short JPY while the US–Japan rate gap is above 2pp, pausing 3 months after MoF yen-buying. Sharpe 0.49 vs 0.35 for always short. Currently paused through Oct 2026.
+3. **Watch:** long INR only while RBI reserves are rising. Sharpe 0.30 vs 0.16 for always long, but weak since 2013, so it's a monitor rather than a trade.
+
+All three are backtested monthly from 2000 to Sep 2026, net of costs, using only data published at the time. The rules win on risk-adjusted return and drawdowns, not raw return.
+
 ## Headline findings (details, caveats and the scorecard are in the notebook)
 - UIP fails, with a pooled β of 0.25. USDJPY has ended ~96% (log) above its UIP-implied path since 2012.
 - The original thesis ("defended net-importer high-yielders pay") is **reversed** in the data. Net-importer carry earns less and crashes harder.

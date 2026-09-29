@@ -308,3 +308,75 @@ REPORTED_2026 = pd.DataFrame([
     {"date": pd.Timestamp("2026-07-31"), "yen_tn": 8.4, "direction": "buy JPY",
      "pair": "reported joint US-Japan operation (US Treasury sold EUR for JPY)"},
 ])
+
+
+# --------------------------------------------------------------------------
+# Backtest engine (shared by the Final Proposal section and section 6)
+# --------------------------------------------------------------------------
+G10_COST_BP, EM_COST_BP = 4.0, 12.0      # one-way cost per unit of notional traded
+G10_ROLL_BP, EM_ROLL_BP = 0.5, 2.0       # monthly forward-roll cost per unit held
+
+
+def cost_vectors(codes) -> tuple[pd.Series, pd.Series]:
+    g10 = {c: U[c].group == "G10" for c in codes}
+    cost = pd.Series({c: G10_COST_BP if g10[c] else EM_COST_BP for c in codes})
+    roll = pd.Series({c: G10_ROLL_BP if g10[c] else EM_ROLL_BP for c in codes})
+    return cost, roll
+
+
+def tercile_w(signal: pd.DataFrame, q: float = 1 / 3, min_n: int = 6) -> pd.DataFrame:
+    """Equal-weight long top-q / short bottom-q of currencies by `signal` (each leg = 100%)."""
+    r = signal.rank(axis=1, pct=True)
+    lo, sh = (r > 1 - q).astype(float), (r <= q).astype(float)
+    w = lo.div(lo.sum(1), axis=0) - sh.div(sh.sum(1), axis=0)
+    w[signal.notna().sum(axis=1) < min_n] = 0
+    return w.fillna(0)
+
+
+def zx(df: pd.DataFrame) -> pd.DataFrame:
+    """Cross-sectional z-score each month."""
+    return df.sub(df.mean(1), axis=0).div(df.std(1), axis=0)
+
+
+def run_basket(P: dict, w: pd.DataFrame, start: str = "2000-01-31") -> tuple[pd.Series, float]:
+    """Monthly net returns of weights `w` (set at month-end t, earn rx over t+1).
+    Returns (net return series, average annual turnover)."""
+    rx = P["rx"]
+    w = w.reindex(columns=rx.columns, fill_value=0)[start:]
+    cost, roll = cost_vectors(w.columns)
+    gross = (w.shift(1) * rx[w.columns].reindex(w.index).fillna(0)).sum(axis=1)
+    turnover = (w - w.shift(1).fillna(0)).abs()
+    tc = (turnover * cost).sum(axis=1).shift(1).fillna(0) / 1e4 + (w.shift(1).abs() * roll).sum(axis=1) / 1e4
+    return (gross - tc).iloc[1:], turnover.sum(axis=1).mean() * 12
+
+
+def run_single(P: dict, code: str, position: pd.Series, side: int, start: str = "2000-01-31") -> pd.Series:
+    """Net monthly return of holding `side` (+1 long / -1 short) `code` vs USD whenever
+    `position` (bool/0-1, decided at month-end t) is on; same cost model as run_basket."""
+    w = pd.DataFrame({code: side * position.astype(float).reindex(P["rx"].index).fillna(0)})
+    return run_basket(P, w, start)[0]
+
+
+def yen_buying_months(index: pd.DatetimeIndex) -> pd.Series:
+    """¥ trillion of MoF yen-BUYING per month (official daily record + reported 2026 ops)."""
+    iv = intervention_table()
+    ops = pd.concat([iv[iv.direction == "buy JPY"], REPORTED_2026[REPORTED_2026.direction == "buy JPY"]])
+    return ops.set_index("date").yen_tn.resample("ME").sum().reindex(index).fillna(0)
+
+
+def proposal_signals(P: dict) -> dict:
+    """The three proposed trades, as position/weight rules (all decided at month-end)."""
+    carry, tb, spot = P["carry"], P["trade"], P["spot"]
+    g10 = [c for c in spot if U[c].group == "G10"]
+    gap_jp = -carry["JPY"]                                          # US minus Japan short rate
+    cooldown = yen_buying_months(spot.index).rolling(3, min_periods=1).max() > 0
+    res_up = np.log(P["reserves"]["INR"]).diff(3) > 0
+    return {
+        "core": 0.5 * tercile_w(carry) + 0.5 * tercile_w(tb),
+        "core_g10": 0.5 * tercile_w(carry[g10]) + 0.5 * tercile_w(tb[g10]),
+        "carry_only": tercile_w(carry),
+        "jpy_rule": (gap_jp > 0.02) & ~cooldown,
+        "jpy_always": pd.Series(True, index=spot.index),
+        "inr_rule": res_up,
+        "inr_always": pd.Series(True, index=spot.index),
+    }

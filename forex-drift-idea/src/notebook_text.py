@@ -503,3 +503,51 @@ TEXT["s8_refs"] = r"""
 * Bloomberg — [RBI intervenes as rupee drops to record low (20 May 2026)](https://www.bloomberg.com/news/articles/2026-05-20/inr-usd-indian-central-bank-intervenes-as-rupee-drops-to-record-low)
 * Japan MoF — [Foreign Exchange Intervention Operations](https://www.mof.go.jp/english/policy/international_policy/reference/feio/index.html)
 """
+
+
+# =============================================================================
+# FINAL PROPOSAL (top-of-notebook summary for slides)
+# =============================================================================
+TEXT["final"] = r"""
+---
+## ⭐ Final proposal: the trades we'd put forward
+*One-page summary for the presentation. Everything below is computed from the same data and backtest engine as §6 (`src/fxlib.py`), **net of costs**.*
+
+| | Trade | Rule (checked once a month) | Why it should work | How to trade it | Grade |
+|---|---|---|---|---|---|
+| **1** | **CORE: carry + trade-balance basket** | Rank 17 currencies. **50%:** long top third by interest-rate gap vs USD, short bottom third. **50%:** long top third by trade balance (net exporters), short bottom third (net importers). Rebalance monthly. | Carry is the classic FX premium (UIP fails, §5.2). The trade balance separates high-yielders that hold up (exporters) from ones that crash (importers, §5.4), and it made money in 8 of carry's 10 worst months (§5.7). | CME futures / FX forwards. **Retail:** G10-only version (1b) with CME micro futures. Vol-target ~8%. | **Primary recommendation** |
+| **2** | **SATELLITE: short yen, with an intervention pause** | Short JPY vs USD while the US–Japan short-rate gap is **> 2pp**. **Stand aside for 3 months** after any MoF yen-buying. | The widest, most persistent UIP failure in the panel (§2, §3.1). Interventions cause sharp 2–5% reversals that usually fade (§3.3), so avoid the post-intervention window rather than fight it. | CME yen futures (6J / micro MJY), or short yen ETF/spot. | **Secondary**: risk-managed, few events |
+| **3** | **WATCH: long rupee only while the RBI is accumulating** | Long INR vs USD only if RBI FX reserves rose over the last 3 months. | The RBI spends reserves to defend the rupee (§4.3). Falling reserves = stress building, rising = calm inflows. | Hard for US retail (INR futures are mainly on NSE / GIFT City; NRIs via FCNR/NRE deposits). | **Monitor, not a trade**: weak recent record |
+
+The table and charts below are the evidence; the notes after them explain how to read it.
+"""
+
+TEXT["final_after"] = r"""
+#### How these were backtested
+* **Period and frequency:** monthly, **Jan 2000 – Sep 2026** (~320 months), 17 currencies (9 G10 + 8 EM).
+* **No look-ahead:** each month's decision uses only data published by then (trade data lagged 2 months, reserves 1 month, rates as of month-end). Positions are set at month-end *t* and earn the return over month *t+1*.
+* **Return = interest earned + currency move:** the full P&L of holding the currency against USD (`rx = rate gap/12 − Δlog spot`), not just the price change.
+* **Costs:** 4bp (G10) / 12bp (EM) per unit traded plus a monthly forward-roll cost (0.5bp / 2bp). The same cost model is applied to all three trades and their benchmarks.
+* **Benchmarks:** each rule is shown next to its naive version (carry only, always short yen, always long rupee), so the value added by the rule is visible.
+* **Stability checks (§6.2):** the core trade's Sharpe stays in a **0.61–0.79** range across 12 variations (how many currencies to hold, monthly vs quarterly rebalancing, 2- vs 4-month trade-data lag). The two halves of the sample (2000–12 / 2013–26) are shown separately.
+
+#### Honest verdict per trade
+> **Read the charts correctly: the rules win on *risk*, not on raw return.** Unlevered, carry-only ends *higher* than the core trade (+145% vs +118%), and always-short-yen ends higher than the yen rule (+144% vs +111%). The rules earn a bit less but with much smaller swings. **At equal risk** (scaling the core to carry's 7.7% volatility) the core would have returned about **5.6%/yr vs 3.4%/yr** for carry alone, with a similar worst drawdown (about -19% vs -18%). Same risk, roughly 65% more return: that comparison is the fair one for the pitch.
+
+* **Core (1):** the strongest result. Sharpe **0.73** vs 0.44 for carry alone, **max drawdown −10% vs −18%**, similar in both halves (0.79 / 0.68). Returns are modest unlevered (~2.9%/yr at 4% vol); at an 8% vol target that's roughly **6%/yr** with drawdowns of ~20%. **Caveat:** we chose this design after seeing the full-sample results in §5, so the half-sample split shows the result is *stable*, not that it's truly *out-of-sample*. Paper-trading from Oct 2026 and adding more currencies are the real tests.
+* **Yen (2):** improves on "always short yen" (Sharpe **0.49 vs 0.35**, drawdown **−24% vs −35%**), mostly by skipping post-intervention months. But the pause rule relies on ~5 modern interventions. Present it as **risk management for an existing carry view**, not proven alpha.
+* **Rupee (3):** the filter roughly doubles the Sharpe (**0.30 vs 0.16**) and halves the drawdown. But even filtered, the trade has barely paid since 2013 (Sharpe 0.10) and lost over the last 5 years, because the rate gap shrank as US rates rose. **We would not propose it as a live trade.** Its value is as a **stress gauge** for the India story, and it's the cautionary tale behind the core trade's "avoid net-importer carry" rule.
+
+#### What would make us stop / change our mind (kill criteria)
+* **Core:** a drawdown beyond **−15%** (1.5× the historical maximum) or a negative rolling 3-year Sharpe → pause and re-examine. Also watch for a global commodity crash, because the long book leans on commodity exporters (BRL, NOK, ZAR, IDR).
+* **Yen:** the US–Japan gap falling below 2pp (Fed cuts and/or faster BoJ hikes) switches the trade off automatically. Another *coordinated* US–Japan intervention restarts the 3-month pause.
+* **Rupee:** stays on watch. It would only graduate to a trade if the rate gap widens again (> ~3pp) *and* reserves rise from organic inflows rather than FCNR swaps.
+"""
+
+# costs are now included in the final section; label the older no-cost numbers
+TEXT["s6_4"] = TEXT["s6_4"].replace("(Sharpe 0.52 vs 0.38 always-short)", "(Sharpe 0.49 vs 0.35 always-short, net of costs)").replace(
+    "(Sharpe 0.38 vs 0.20)", "(Sharpe 0.30 vs 0.16 net of costs; weak since 2013, so monitor rather than trade)")
+TEXT["s6_3"] = TEXT["s6_3"] + "\n*These tables are **before costs**. The ⭐ Final Proposal section at the top shows the same rules **net of costs**.*\n"
+TEXT["tldr"] = TEXT["tldr"].replace("roughly doubles the Sharpe (0.20 → 0.38) and halves the drawdown.**",
+    "roughly doubles the Sharpe (0.16 → 0.30 net of costs) and halves the drawdown**, but even filtered it has barely paid since 2013, so we treat it as a watch signal, not a trade.")
+TEXT["toc"] = TEXT["toc"].replace("### Contents\n", "### Contents\n0. **⭐ Final proposal** (above) — the three trades, backtests net of costs, current signals\n")

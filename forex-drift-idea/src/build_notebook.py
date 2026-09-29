@@ -25,6 +25,74 @@ def code(src: str) -> None:
 # =============================================================================
 md("title")
 md("tldr")
+md("final")
+code(r'''
+# Self-contained so this summary runs on its own; uses the same engine as section 6.
+import sys, warnings
+sys.path.insert(0, "src"); warnings.filterwarnings("ignore")
+import numpy as np, pandas as pd, matplotlib.pyplot as plt
+import fxlib as fx
+fx.set_style(); pd.set_option("display.float_format", lambda x: f"{x:,.2f}")
+
+P0 = fx.build_panel(); S0 = fx.proposal_signals(P0)
+FINAL = {
+    "1. CORE: carry + trade-balance basket (17 ccy)": fx.run_basket(P0, S0["core"])[0],
+    "1b. Core, G10-only (retail / CME futures)":      fx.run_basket(P0, S0["core_g10"])[0],
+    "    benchmark: carry only":                        fx.run_basket(P0, S0["carry_only"])[0],
+    "2. SATELLITE: short JPY, paused after MoF":       fx.run_single(P0, "JPY", S0["jpy_rule"], -1),
+    "    benchmark: always short JPY":                  fx.run_single(P0, "JPY", S0["jpy_always"], -1),
+    "3. WATCH: long INR while RBI reserves rising":    fx.run_single(P0, "INR", S0["inr_rule"], +1),
+    "    benchmark: always long INR":                   fx.run_single(P0, "INR", S0["inr_always"], +1),
+}
+summary = fx.perf_table(FINAL)[["Ann. return %", "Ann. vol %", "Sharpe", "Max drawdown %", "Worst month %"]]
+summary["Sharpe 2000-12"] = [fx.perf(r[:"2012"])["Sharpe"] for r in FINAL.values()]
+summary["Sharpe 2013-26"] = [fx.perf(r["2013":])["Sharpe"] for r in FINAL.values()]
+summary["Sharpe last 5y"] = [fx.perf(r[r.index[-1] - pd.DateOffset(years=5):])["Sharpe"] for r in FINAL.values()]
+summary["% months invested"] = [100 * (r != 0).mean() for r in FINAL.values()]
+print(f"All figures NET of costs, monthly, Jan 2000 - {P0['spot'].index[-1]:%b %Y}. Unlevered.")
+summary
+''')
+code(r'''
+k = list(FINAL)
+fig, ax = plt.subplots(2, 2, figsize=(13, 8.2))
+def cum(r): return 100 * (np.exp(r.cumsum()) - 1)
+def dd(r):  e = r.cumsum(); return 100 * (np.exp(e - e.cummax()) - 1)
+def endlab(a, s):
+    a.annotate(f"{s.iloc[-1]:+.0f}%", (s.index[-1], s.iloc[-1]), xytext=(3, 0), textcoords="offset points", fontsize=8.5, color=fx.INK2, va="center")
+
+for key, col, lw, lab in [(k[0], fx.INK, 2.2, "Core: carry + trade balance"), (k[2], fx.BLUE, 1.3, "Carry only"), (k[1], fx.AQUA, 1.3, "Core, G10-only (retail)")]:
+    s = cum(FINAL[key]); ax[0, 0].plot(s.index, s, color=col, lw=lw, label=lab); endlab(ax[0, 0], s)
+    d = dd(FINAL[key]); ax[0, 1].plot(d.index, d, color=col, lw=lw, label=lab)
+ax[0, 0].set_title("1. Core trade: cumulative return"); ax[0, 0].set_ylabel("%"); ax[0, 0].legend(loc="upper left")
+ax[0, 1].set_title("1. Core trade: drawdowns (smaller is better)"); ax[0, 1].set_ylabel("%"); ax[0, 1].legend(loc="lower left")
+
+for a, rule, bench, col, title in [(ax[1, 0], k[3], k[4], fx.BLUE, "2. Short JPY: rule vs. always short"),
+                                   (ax[1, 1], k[5], k[6], fx.ORANGE, "3. Long INR: rule vs. always long")]:
+    sb, sr = cum(FINAL[bench]), cum(FINAL[rule])
+    a.plot(sb.index, sb, color=fx.GRAY, lw=1.2, label="Always in"); endlab(a, sb)
+    a.plot(sr.index, sr, color=col, lw=2.0, label="Rule"); endlab(a, sr)
+    a.axhline(0, color=fx.GRAY, lw=0.8); a.set_title(title); a.set_ylabel("%"); a.legend(loc="upper left")
+fig.suptitle("Final proposal: backtests net of costs, Jan 2000 - Sep 2026 (unlevered)", x=0.01, ha="left", fontsize=13.5, fontweight="bold")
+fx.source_note(ax[1, 0], "Costs: G10 4bp / EM 12bp per trade + monthly forward roll. Signals use only data published at the time.")
+fig.tight_layout(); fx.save(fig, "00_final_proposal_backtests"); plt.show()
+''')
+code(r'''
+# What each trade says TODAY (latest published data)
+w = S0["core"].iloc[-1]; w = w[w.abs() > 1e-9].sort_values()
+pos = pd.DataFrame({"Core weight": w, "Side": np.where(w > 0, "LONG", "SHORT"),
+                    "Rate gap vs USD %": 100 * P0["carry"].ffill().iloc[-1].reindex(w.index),
+                    "Trade bal % of trade": P0["trade"].ffill().iloc[-1].reindex(w.index)})
+res = P0["reserves"]["INR"].dropna()
+gap_now = -100 * P0["carry"]["JPY"].ffill().iloc[-1]
+last_buy = fx.yen_buying_months(P0["spot"].index); last_buy = last_buy[last_buy > 0].index[-1]
+print(f"CORE basket positions for next month (as of {P0['spot'].index[-1]:%b %Y}):"); display(pos.round(2))
+print(f"SATELLITE (short JPY): US-Japan gap = {gap_now:.2f}pp (> 2 needed). Last MoF yen-buying month: {last_buy:%b %Y} "
+      f"-> {'PAUSED until ' + (last_buy + pd.offsets.MonthEnd(3)).strftime('%b %Y') + ' ends' if P0['spot'].index[-1] <= last_buy + pd.offsets.MonthEnd(3) else 'ACTIVE'}")
+chg = 100 * np.log(res.iloc[-1] / res.iloc[-4])
+print(f"WATCH (long INR): RBI reserves (latest reading, {(res.index[-1] - pd.offsets.MonthEnd(1)):%b %Y} data) 3m change = {chg:+.1f}% -> {'ON' if chg > 0 else 'OFF'} "
+      "(but the rise is mostly FCNR(B) swap inflows - borrowed dollars, treat as weak)")
+''')
+md("final_after")
 md("toc")
 md("neutrality")
 
@@ -651,25 +719,10 @@ md("s5_7_read")
 md("s6")
 code(r'''
 G10 = [c for c in spot if fx.U[c].group == "G10"]
-COST = pd.Series({c: (4.0 if fx.U[c].group == "G10" else 12.0) for c in spot})   # bps per unit traded (one way)
-ROLL = pd.Series({c: (0.5 if fx.U[c].group == "G10" else 2.0) for c in spot})    # bps per month per unit held (forward roll)
 
-def tercile_w(signal, q=1/3, min_n=6):
-    r = signal.rank(axis=1, pct=True)
-    lo, sh = (r > 1 - q).astype(float), (r <= q).astype(float)
-    w = lo.div(lo.sum(1), axis=0) - sh.div(sh.sum(1), axis=0)
-    w[signal.notna().sum(axis=1) < min_n] = 0
-    return w.fillna(0)
-
-def zx(df):
-    return df.sub(df.mean(1), axis=0).div(df.std(1), axis=0)
-
+tercile_w, zx = fx.tercile_w, fx.zx                       # shared engine in src/fxlib.py (same as the Final Proposal)
 def run(w, start="2000-01-31"):
-    w = w.reindex(columns=spot.columns, fill_value=0)[start:]
-    gross = (w.shift(1) * rx[w.columns].reindex(w.index).fillna(0)).sum(axis=1)
-    turnover = (w - w.shift(1).fillna(0)).abs()
-    cost = (turnover * COST).sum(axis=1).shift(1).fillna(0) / 1e4 + (w.shift(1).abs() * ROLL).sum(axis=1) / 1e4
-    return (gross - cost).iloc[1:], turnover.sum(axis=1).mean() * 12
+    return fx.run_basket(P, w, start)
 
 W = {
     "A. Carry (17 ccy)": tercile_w(carry),
